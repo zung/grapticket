@@ -132,9 +132,9 @@ def get_passengers():
     pa = r'var passengers=(.*?);\n var pageSize ='
     passengers = re.findall(pa, html)
     peoples = json.loads(passengers[0].replace("'", '"'))
-    print(peoples)
+
+    print(json.dumps(peoples, sort_keys=True, indent=2))
 
 
 if __name__ == '__main__':
     index()
-
