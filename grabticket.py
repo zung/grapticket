@@ -1,7 +1,9 @@
+import base64
 import json
 import random
 
 import re
+
 import requests
 
 session = requests.session()
@@ -25,6 +27,7 @@ _data = {
     'passport_okPage': 'index/initMy12306',
     'passport_proxy_captcha':  'login/init'
 }
+
 
 def index():
     url = 'https://kyfw.12306.cn/otn/login/init'
@@ -109,6 +112,8 @@ def uampasswort(tk):
     if msg['result_code'] == 0: # 验证通过
         # 跳转到指定页面
         get_passengers()
+        get_left_ticket_log()
+
     else:
         print(msg['result_message'])
 
@@ -126,6 +131,7 @@ def get_captcha():
 
 
 def get_passengers():
+    """获取联系人"""
     url = 'https://kyfw.12306.cn/otn/passengers/init'
     res = session.get(url, verify=False)
     html = res.text
@@ -133,8 +139,81 @@ def get_passengers():
     passengers = re.findall(pa, html)
     peoples = json.loads(passengers[0].replace("'", '"'))
 
-    print(json.dumps(peoples, sort_keys=True, indent=2))
+    return peoples
+
+
+def get_left_ticket_log():
+    url = 'https://kyfw.12306.cn/otn/leftTicket/log?leftTicketDTO.train_date=2017-11-06&leftTicketDTO.from_station=\
+    JGK&leftTicketDTO.to_station=UCK&purpose_codes=ADULT'
+    res = session.get(url, verify=False)
+    msg = json.loads(res.text)
+    print(msg)
+    if msg['status'] and msg['validateMessagesShowId'] == '_validatorMessage':
+        get_left_ticket()
+    else:
+        print(msg)
+
+
+def get_left_ticket():
+    url = 'https://kyfw.12306.cn/otn/leftTicket/query?leftTicketDTO.train_date=2017-11-07&leftTicketDTO.from_station=JGK&leftTicketDTO.to_station=UCK&purpose_codes=ADULT'
+    res = session.get(url, verify=False)
+    msg = json.loads(res.text)
+    print(json.dumps(msg, sort_keys=True, indent=2, ensure_ascii=False))
+    results = msg['data']['result']
+
+    info = []
+    train = {}
+
+    for result in results:
+        cols = result.split('|')
+        train['车次'] = cols[3]
+        train['出发站'] = get_name_by_code(cols[4])
+        train['到达站'] = get_name_by_code(cols[5])
+        train['出发时间'] = cols[8]
+        train['到达时间'] = cols[9]
+        train['历时'] = cols[10]
+        train['当日到达'] = cols[11]
+        info.append(train)
+
+        for i, c in enumerate(cols):
+            if i == 0 or i == 12:
+                continue
+            print('%s:\t%s'%(i + 1, c), end=' ')
+            if (i+1) % 9 == 0:
+                print('')
+        print('')
+
+    print(info)
+
+
+
+def base642str(_base64):
+    return base64.b64decode(_base64)
+
+
+def get_station_names():
+    """获取所有站点名字"""
+    url = 'https://kyfw.12306.cn/otn/resources/js/framework/station_name.js?station_version=1.9030'
+    res = session.get(url, verify=False)
+    js = res.text
+    result = js.split("'")[1]
+    stations = {}
+    for city in result.split('@'):
+        if city:
+            s = city.split('|')
+            stations[s[2]] = {}
+            stations[s[2]]['汉字'] = s[1]
+            stations[s[2]]['简拼'] = s[0]
+            stations[s[2]]['全拼'] = s[3]
+    json.dump(stations, open('stations.json', 'w'))
+
+
+def get_name_by_code(code):
+    stations = json.load(open('stations.json', 'r'))
+    return stations[code]['汉字']
 
 
 if __name__ == '__main__':
-    index()
+    # index()
+    get_left_ticket()
+    # get_station_names()
