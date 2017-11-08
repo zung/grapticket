@@ -156,8 +156,8 @@ def submit_order(t):
         'back_train_date': backDate,
         'tour_flag': 'dc',
         'purpose_codes': 'ADULT',
-        'query_from_station_name': '上海',
-        'query_to_station_name': '北京',
+        'query_from_station_name': t['出发站'],
+        'query_to_station_name': t['到达站'],
         'undefined': ''
     }
 
@@ -281,10 +281,10 @@ def get_left_ticket():
         train['软卧'] = cols[23]
         train['动卧'] = cols[33]
         train['硬卧'] = cols[28]
-        train['软座'] = ''
-        train['硬座'] = cols[26]
-        train['无座'] = cols[29]
-        train['其它'] = ''
+        train['软座'] = cols[24]
+        train['硬座'] = cols[29]
+        train['无座'] = cols[26]
+        train['其它'] = cols[22]
         train['secretStr'] = cols[0]
         if cols[0]:
             info.append(train)
@@ -315,8 +315,6 @@ def get_left_ticket():
             break
         else:
             continue
-
-
 
 
 def get_station_names():
