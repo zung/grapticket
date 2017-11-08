@@ -1,8 +1,7 @@
-import base64
 import json
 import random
-
 import re
+from urllib.parse import quote
 
 import requests
 import urllib3
@@ -113,6 +112,7 @@ def uampasswort(tk):
         'tk': tk
     }
     res = session.post(url, data=data, verify=False)
+    print(res.text)
     msg = json.loads(res.text)
 
     if msg['result_code'] == 0: # 验证通过
@@ -126,8 +126,10 @@ def uampasswort(tk):
 def check_user():
     """验证用户"""
     url = 'https://kyfw.12306.cn/otn/login/checkUser'
-    data = {}
-    res = session.post(url, verify=False, headers={'If-Modified-Since': '0', 'Cache-Control': 'no-cache'})
+    data = {'_json_att':''}
+    res = session.post(url, verify=False, headers={'If-Modified-Since': '0',
+                                                   'Cache-Control': 'no-cache',
+                                                   'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8'})
     msg = json.loads(res.text)
     print('验证用户')
     print(msg)
@@ -142,50 +144,56 @@ def check_user():
 
 def submit_order(t):
     """提交订单"""
-    if not check_user():
-        print('')
-        return False
 
     url = 'https://kyfw.12306.cn/otn/leftTicket/submitOrderRequest'
     trainDate = str2date_format1(t['出发日'])
     backDate = trainDate
 
     data = {
-        'secretStr': t['secretStr'],
-        'train_date': trainDate,
-        'back_train_date': backDate,
-        'tour_flag': 'dc',
-        'purpose_codes': 'ADULT',
-        'query_from_station_name': t['出发站'],
-        'query_to_station_name': t['到达站'],
-        'undefined': ''
+        "secretStr": t['secretStr'],
+        "train_date": trainDate,
+        "back_train_date": backDate,
+        "tour_flag": "dc",
+        "purpose_codes": "ADULT",
+        "query_from_station_name": "南京",
+        "query_to_station_name": "上海",
+        "undefined": ""
     }
 
     headers = {
-        'Host': 'kyfw.12306.cn',
-        'Connection': 'keep-alive',
-        'Accept': '*/*',
-        'User-Agent': 'Mozilla/5.0(Windows NT 10.0; Win64; x64) AppleWebKit/537.36(KHTML, like Gecko) Chrome/62.0.3202.89 Safari/537.36',
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'DNT': '1',
-        'Referer': 'https://kyfw.12306.cn/otn/leftTicket/init',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Accept-Language': 'zh-CN, zh; q=0.9'
+        "Host": "kyfw.12306.cn",
+        "Connection": "keep-alive",
+        "Accept": "*/*",
+        "User-Agent": "Mozilla/5.0(Windows NT 10.0; Win64; x64) AppleWebKit/537.36(KHTML, like Gecko) Chrome/62.0.3202.89 Safari/537.36",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "DNT": "1",
+        "Referer": "https://kyfw.12306.cn/otn/leftTicket/init",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "zh-CN, zh; q=0.9",
     }
 
+    if not check_user():
+        return False
+
     res = session.post(url, data=data, verify=False)
+
     msg = json.loads(res.text)
     print(msg)
     if msg['status']:
         if msg['data'] == 'Y':
             print('您选择的列车距开车时间很近了，\n请确保有足够的时间抵达车站，\n并办理换取纸质车票、安全检查、\
             实名制验证及检票等手续，以免耽误您的旅行。')
-        # 获取联系人
-        passengers = get_passengers()
-        return get_pass_code()
+        # 跳转到确认乘客人页面
+        confirm_passenger()
     else:
         print(msg['messages'])
         return False
+
+
+def confirm_passenger():
+    url = 'https://kyfw.12306.cn/otn/confirmPassenger/initDc'
+    res = session.get(url, verify=False)
+    print(res.text)
 
 
 def str2date_format1(str):
@@ -250,6 +258,20 @@ def get_left_ticket():
 
     _from = get_code_by_input(f)
     _to = get_code_by_input(t)
+
+    cookies = {
+        "_jc_save_fromDate": d,
+        "_jc_save_fromStation": '%u6D4E%u5357%2CJNK',
+        "_jc_save_toDate": d,
+        "_jc_save_toStation": '%u5317%u4EAC%2CBJP',
+        "_jc_save_wfdc_flag": "dc",
+        "current_captcha_type": 'Z'
+    }
+
+    requests.utils.add_dict_to_cookiejar(session.cookies, cookies)
+
+    # ck = requests.utils.cookiejar_from_dict(cookies)
+    # session.cookies = ck
 
     if not get_left_ticket_log(d, _from, _to):
         return None
