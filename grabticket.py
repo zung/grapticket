@@ -5,13 +5,12 @@ from urllib.parse import quote
 
 import requests
 import urllib3
+from PIL import Image
 
 from urllib3.exceptions import InsecureRequestWarning
 
 # 禁用安全请求警告
 urllib3.disable_warnings(InsecureRequestWarning)
-
-session = requests.session()
 
 _data = {
     'ctx':'/otn/',
@@ -33,6 +32,16 @@ _data = {
     'passport_proxy_captcha':  'login/init'
 }
 
+headers = {
+    "Accept": "*/*",
+    "User-Agent": "Mozilla/5.0(Windows NT 10.0; Win64; x64) AppleWebKit/537.36(KHTML, like Gecko) Chrome/62.0.3202.89 Safari/537.36",
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "Accept-Language": "zh-CN, zh; q=0.9",
+}
+
+session = requests.session()
+session.headers = headers
+
 
 def index():
     url = 'https://kyfw.12306.cn/otn/login/init'
@@ -42,6 +51,9 @@ def index():
 
 def check_captcha():
     """校验验证码"""
+    img = Image.open('captcha.png')
+    img.show()
+
     code = input("请输入验证码：")
     url = 'https://kyfw.12306.cn/passport/captcha/captcha-check'
     data = {
@@ -93,7 +105,7 @@ def check_login():
 
     tk = None
 
-    if msg['result_code'] == 0: # 已经登录
+    if msg['result_code'] == 0:  # 已经登录
         if msg['apptk']:
             tk = msg['apptk']
         else:
@@ -127,7 +139,7 @@ def check_user():
     """验证用户"""
     url = 'https://kyfw.12306.cn/otn/login/checkUser'
     data = {'_json_att':''}
-    res = session.post(url, verify=False, headers={'If-Modified-Since': '0',
+    res = session.post(url, data=data, verify=False, headers={'If-Modified-Since': '0',
                                                    'Cache-Control': 'no-cache',
                                                    'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8'})
     msg = json.loads(res.text)
@@ -142,7 +154,7 @@ def check_user():
     return False
 
 
-def submit_order(t):
+def submit_order(t, _f, _t):
     """提交订单"""
 
     url = 'https://kyfw.12306.cn/otn/leftTicket/submitOrderRequest'
@@ -155,21 +167,9 @@ def submit_order(t):
         "back_train_date": backDate,
         "tour_flag": "dc",
         "purpose_codes": "ADULT",
-        "query_from_station_name": "南京",
-        "query_to_station_name": "上海",
-        "undefined": ""
-    }
-
-    headers = {
-        "Host": "kyfw.12306.cn",
-        "Connection": "keep-alive",
-        "Accept": "*/*",
-        "User-Agent": "Mozilla/5.0(Windows NT 10.0; Win64; x64) AppleWebKit/537.36(KHTML, like Gecko) Chrome/62.0.3202.89 Safari/537.36",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "DNT": "1",
-        "Referer": "https://kyfw.12306.cn/otn/leftTicket/init",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Accept-Language": "zh-CN, zh; q=0.9",
+        "query_from_station_name": _f,
+        "query_to_station_name": _t,
+        "undefined": None
     }
 
     if not check_user():
@@ -259,16 +259,21 @@ def get_left_ticket():
     _from = get_code_by_input(f)
     _to = get_code_by_input(t)
 
+    fromStation = quote(get_code_by_input(_from) + ',' + _from)
+    toStation = quote(get_code_by_input(_to) + ',' + _to)
+
     cookies = {
         "_jc_save_fromDate": d,
-        "_jc_save_fromStation": '%u6D4E%u5357%2CJNK',
+        "_jc_save_fromStation": fromStation,
         "_jc_save_toDate": d,
-        "_jc_save_toStation": '%u5317%u4EAC%2CBJP',
+        "_jc_save_toStation": toStation,
         "_jc_save_wfdc_flag": "dc",
         "current_captcha_type": 'Z'
     }
 
     requests.utils.add_dict_to_cookiejar(session.cookies, cookies)
+
+    print(cookies)
 
     # ck = requests.utils.cookiejar_from_dict(cookies)
     # session.cookies = ck
@@ -333,7 +338,7 @@ def get_left_ticket():
             continue
 
         t = info[k - 1]
-        if submit_order(t):
+        if submit_order(t, get_code_by_input(_from), get_code_by_input(_to)):
             break
         else:
             continue
