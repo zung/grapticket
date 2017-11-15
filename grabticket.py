@@ -7,6 +7,7 @@ import datetime
 import requests
 import urllib3
 from PIL import Image
+from bs4 import BeautifulSoup
 
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -29,6 +30,8 @@ class GrabTicket(object):
 
     def __init__(self):
         self.D = None
+        self.M = []
+        self.ay = []
         self.id_type_code = ''
         self.ticket_submit_order = GrabTicket.ticket_submit_order()
         self.init_seatTypes = {}
@@ -37,6 +40,7 @@ class GrabTicket(object):
         self.ticket_seat_codeMap = {}
         self.ticketInfoForPassengerForm = {}
         self.orderRequestDTO = {}
+        self.limit_tickets = []
 
     def index(self):
         url = 'https://kyfw.12306.cn/otn/login/init'
@@ -192,7 +196,7 @@ class GrabTicket(object):
         self.init_cardTypes = self.get_dict(r'var init_cardTypes=(.*?);', text)  # 初始证件类型
         self.ticket_seat_codeMap = self.get_dict(r'var ticket_seat_codeMap=(.*?);', text)  # 车票座位代码地图
         self.orderRequestDTO = self.get_dict(r'var orderRequestDTO=(.*?);', text)  # 订单请求DTO
-        self.id_type_code = re.findall(r'var id_type_code = \'(.*?)\'')[0]
+        self.id_type_code = re.findall(r'var id_type_code = \'(.*?)\'', text)[0]
         # print(json.dumps(self.ticketInfoForPassengerForm, sort_keys=True, indent=2, ensure_ascii=False))
         # print(json.dumps(self.ticket_submit_order, sort_keys=True, indent=2, ensure_ascii=False))
         self.D = self.P(self.ticket_seat_codeMap, self.defaultTicketTypes)
@@ -200,12 +204,11 @@ class GrabTicket(object):
     def P(self, ticket_seat_codeMap, defaultTicketTypes):
         arr = []
         for m in ticket_seat_codeMap:
-            for t in defaultTicketTypes.keys():
-                if defaultTicketTypes[t] == m:
-                    arr.append(ticket_seat_codeMap[t])
+            for t in defaultTicketTypes:
+                if t['id'] == m:
+                    arr.append(t)
                     break
-
-
+        return sorted(arr, key=lambda t: t['id'])
 
     @staticmethod
     def get_dict(pattern, text):
@@ -270,12 +273,19 @@ class GrabTicket(object):
 
             p = normal_passengers[k - 1]
             break
+        af = 'normalPassenger_0'
+        aj = self.ay[int(af.split('_')[1])]
+        ac = self.ticket_type2(aj['passenger_type']) #index=3
+        args = [af, '3', '硬卧（￥65.5）', '1', '成人票', aj['passenger_name'], aj['passenger_id_type_code'], aj['passenger_id_type_name'],\
+                aj['passenger_id_no'], aj['mobile_no'], '', self.ticketInfoForPassengerForm['tour_flag'], True, \
+                aj['passenger_type'], False, None]
 
-        args = ('a',)
-        passenger_ticket_str = self.get_passenger_tickets(self.limit_tickets(args))
+        self.add_limit_tickets(*args)
+
+        # self.update_save_passenger_info(res.text)
 
         # 验证订单
-        flag = self.check_order_info(token, passenger_ticket_str, oldPassengerStr=None, tour_flag=None)
+        flag = self.check_order_info(token)
         if flag:  # 验证成功
             form_data = {
 
@@ -285,6 +295,29 @@ class GrabTicket(object):
 
         else:
             flag = False
+
+    def update_save_passenger_info(self, html):
+        bs = BeautifulSoup(html, 'lxml')
+
+        del_id = 'del_1_normalPassenger_0'
+        for lt in self.limit_tickets:
+            if lt['only_id'] == (del_id.split('_')[2] + '_' + del_id.split('_')[3]):
+                ac = del_id.split('_')[1]
+                seat_type = bs.find('select', id='seatType_' + ac).select('option[selected="selected"]')
+                print("--------------------------------------------------------")
+                print(seat_type)
+                break
+
+    def Y(self):
+        if len(self.limit_tickets) < 1:
+            return len(self.limit_tickets)
+        else:
+            b = 0
+            for a in self.limit_tickets:
+                z = int(a['only_id'].split('_')[1])
+                if z > b:
+                    b = z
+            return b + 1
 
     def get_queue_count(self, data):
         """获取队列计数"""
@@ -308,30 +341,48 @@ class GrabTicket(object):
         """获取标准时间"""
         return date.strftime('%a %b %Y %H:%M:%S ') + 'GMT+0800 (中国标准时间)'
 
-    @staticmethod
-    def get_passenger_tickets(limit_tickets):
+    def get_passenger_tickets(self):
         _str = ''
-        for v in limit_tickets:
+        for v in self.limit_tickets:
             av = v['seat_type'] + ',0,' + v['ticket_type'] + ',' + v['name'] + ',' \
                  + v['id_type'] + ',' + v['id_no'] + ',' + v['phone_no'] + ',' \
                  + 'N' if v['save_status'] == '' else 'Y'
             _str += av + '_'
-        return _str[:len(str) - 1]
+        return _str[:len(_str) - 1]
 
-    @staticmethod
-    def get_old_passengers(ticket_info_str, limit_tickets):
+    def get_old_passengers(self):
         _str = ''
-        for v in limit_tickets:
-            pass
+        for d in self.limit_tickets:
+            if self.ticketInfoForPassengerForm['tour_flag'] == self.ticket_submit_order['tour_flag']['fc']\
+                or self.ticketInfoForPassengerForm['tour_flag'] == self.ticket_submit_order['tour_flag']['gc']:
+                a = d['name'] + ',' + a['id_type'] + ',' + a['id_no'] + ',' + a['passenger_type']
+                _str += a + '_'
+            else:
+                if 'djPassenger_' in d['only_id']:
+                    b = d['only_id'].split('_')[1]
+                    a = self.M[b]['passenger_name'] + ',' + self.M[b]['passenger_id_type_code'] + ',' +\
+                        self.M[b]['passenger_id_no'] + ',' + self.M[b]['passenger_type']
+                    _str += a + '_'
+                else:
+                    if 'normalPassenger' in d['only_id']:
+                        b = int(d['only_id'].split('_')[1])
+                        a = self.ay[b]['passenger_name'] + ',' + self.ay[b]['passenger_id_type_code'] + ',' +\
+                            self.ay[b]['passenger_id_no'] + ',' + self.ay[b]['passenger_type']
+                        _str += a + '_'
+                    else:
+                        _str += '_ '
+        return _str
 
-    def limit_tickets(self, *args):
+    def add_limit_tickets(self, *args):
         """获取限购车票的列表"""
+        if len(self.limit_tickets) >= 5:
+            print("最多只能购买 5 张车票")
         ticket_type = self.get_ticket_type(args[13], args[6], args[3])
         d = {
             'only_id': args[0],
             'seat_type': args[1],  # 座位类型
             'seat_type_name': args[2],  # 座位类型名称
-            'ticket_type': ticket_type,  # 车票类型
+            'ticket_type': args[3], #ticket_type,  # 车票类型
             'ticket_type_name': args[4],  # 车票类型名称
             'name': args[5],  # 乘客名字
             'id_type': args[6],  # 证件类型
@@ -343,11 +394,17 @@ class GrabTicket(object):
                 if ticket_type == '' else ticket_type],  # 座位所有类型
             # seatTypes 排序根据ag
             'ticketTypes': self.D,
-            'save_status': '',  # 保存状态
-            'tour_flag': '',  # 旅行标识 单程或返程
-            'isDisabled': False,  #
-            'checkboxStatus': False,
+            'cardTypes': self.init_cardTypes,  # 初始所有证件类型
+            'save_status': args[10],  # 保存状态
+            'tour_flag': args[11],  # 旅行标识 单程或返程
+            'isDisabled': True if args[13] == self.ticket_submit_order['ticket_type']['student'] else args[12],  #
+            'isDefaultUsed': False,
+            'checkboxStatus': args[14],
+            'isAccompanyChild': args[15] if args[15] else None
         }
+        # if not args[15]:
+        #     args[15] = False
+        self.limit_tickets.append(d)
 
     def get_ticket_type(self, t1, t2, t3):
         return self.ticket_type1(t1, t2, t3)
@@ -376,29 +433,33 @@ class GrabTicket(object):
         else:
             return ''
 
-
     @staticmethod
     def ticket_submit_order():
         """获取车票提交订单信息"""
         tso = json.load(open('ticket_submit_order.json', 'r', encoding='utf-8'))
         return tso
 
-    def check_order_info(self, token, passenger_ticket_str, old_passenger_str, tour_flag):
+    def check_order_info(self, token):
         """验证订单信息"""
         url = 'https://kyfw.12306.cn/otn/confirmPassenger/checkOrderInfo'
         data = {
             'cancel_flag': '2',
             'bed_level_order_num': '000000000000000000000000000000',
-            'passengerTicketStr': passenger_ticket_str,
-            'oldPassengerStr': old_passenger_str,
-            'tour_flag': tour_flag,
+            'passengerTicketStr': self.get_passenger_tickets(),
+            'oldPassengerStr': self.get_old_passengers(),
+            'tour_flag': self.ticketInfoForPassengerForm['tour_flag'],
             'randCode': '',
             '_json_att': '',
             'REPEAT_SUBMIT_TOKEN': token
         }
 
+        print(data)
+
         res = self.session.post(url, data=data, verify=False)
+        print(res.text)
+        return False
         msg = json.loads(res.text)
+
         if msg['status'] and msg['data']['submitStatus']:
             return True
         else:
@@ -435,6 +496,8 @@ class GrabTicket(object):
         html = res.text
         msg = json.loads(html)
         if msg['status'] and msg['data']['isExist']:
+            self.M = msg['data']['dj_passengers']
+            self.ay = msg['data']['normal_passengers']
             return msg['data']['normal_passengers']
         else:
             print("没有获取到乘客信息")
@@ -573,11 +636,14 @@ class GrabTicket(object):
     @staticmethod
     def get_code_by_input(value):
         stations = json.load(open('stations.json', 'r', encoding='utf-8'))
-        for key in stations.keys():
-            if value in stations[key].values():
-                return key
-        else:
-            return stations[value]['汉字']
+        try:
+            for key in stations.keys():
+                if value in stations[key].values():
+                    return key
+            else:
+                return stations[value]['汉字']
+        except TypeError as e:
+            print(e.with_traceback())
 
 
 if __name__ == '__main__':
