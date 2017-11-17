@@ -126,7 +126,7 @@ class GrabTicket(object):
         if msg['result_code'] == 0:  # 验证通过
             # 跳转到指定页面
             self.get_left_ticket()
-
+            # self.cancel_no_complete_order('E398101627')
         else:
             print(msg['result_message'])
 
@@ -394,9 +394,7 @@ class GrabTicket(object):
 
         if msg['data'] and msg['data']['queryOrderWaitTimeStatus']:
             waitObj = msg['data']
-            self.wait_obj = waitObj
-            if waitObj['waitTime'] != -100:
-                self.dispTime = waitObj['waitTime']
+            if waitObj['waitTime'] != -100 and waitObj['waitTime'] != -1:
                 if waitObj['waitTime'] == -2:
                     print(waitObj['msg'])
                     return False
@@ -404,7 +402,7 @@ class GrabTicket(object):
                     time.sleep(3)
                     self.query_order_wait_time(token)
             else:
-                return self.finish_method(self.wait_obj['tourFlag'], self.dispTime, self.wait_obj, token)
+                return self.finish_method(waitObj['tourFlag'], waitObj['waitTime'], waitObj, token)
 
         else:
             return False
@@ -764,7 +762,7 @@ class GrabTicket(object):
         url = 'https://kyfw.12306.cn/otn/queryOrder/cancelNoCompleteMyOrder'
         data = {
             'sequence_no': sequence_no,
-            'cancel_flag': 'cancel_order',
+            'cancel_flag': '',
             '_json_att': ''
         }
         res = self.session.post(url, data=data, verify=False)
@@ -772,6 +770,7 @@ class GrabTicket(object):
         print(msg)
         if msg['status'] and msg['data']['existError'] == 'N':
             print("取消订单成功！")
+
 
 if __name__ == '__main__':
     GrabTicket().index()
