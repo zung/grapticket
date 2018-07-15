@@ -3,7 +3,7 @@ import random
 import re
 from urllib.parse import quote, unquote
 
-import datetime
+import datetime, time
 import requests
 import urllib3
 from PIL import Image
@@ -41,6 +41,7 @@ class GrabTicket(object):
         self.ticketInfoForPassengerForm = {}
         self.orderRequestDTO = {}
         self.limit_tickets = []
+        self.current_train = {}  # 当前选择的车次
 
     def index(self):
         url = 'https://kyfw.12306.cn/otn/login/init'
@@ -125,7 +126,7 @@ class GrabTicket(object):
         if msg['result_code'] == 0:  # 验证通过
             # 跳转到指定页面
             self.get_left_ticket()
-
+            # self.cancel_no_complete_order('E398101627')
         else:
             print(msg['result_message'])
 
@@ -150,15 +151,15 @@ class GrabTicket(object):
             print(msg['messages'])
         return False
 
-    def submit_order(self, t, _f, _t):
+    def submit_order(self, _f, _t):
         """提交预订单"""
 
         url = 'https://kyfw.12306.cn/otn/leftTicket/submitOrderRequest'
-        train_date = self.str2date_format1(t['出发日'])
+        train_date = self.str2date_format1(self.current_train['出发日'])
         back_date = train_date
 
         data = {
-            "secretStr": unquote(t['secretStr']),
+            "secretStr": unquote(self.current_train['secretStr']),
             "train_date": train_date,
             "back_train_date": back_date,
             "tour_flag": "dc",
@@ -178,12 +179,13 @@ class GrabTicket(object):
 
         msg = json.loads(res.text)
         print(msg)
+
         if msg['status']:
             if msg['data'] == 'Y':
                 print('您选择的列车距开车时间很近了，\n请确保有足够的时间抵达车站，\n并办理换取纸质车票、安全检查、\
                 实名制验证及检票等手续，以免耽误您的旅行。')
             # 跳转到确认乘客人页面
-            self.confirm_passenger()
+            return self.confirm_passenger()
         else:
             print(msg['messages'])
             return False
@@ -197,7 +199,7 @@ class GrabTicket(object):
         self.ticket_seat_codeMap = self.get_dict(r'var ticket_seat_codeMap=(.*?);', text)  # 车票座位代码地图
         self.orderRequestDTO = self.get_dict(r'var orderRequestDTO=(.*?);', text)  # 订单请求DTO
         self.id_type_code = re.findall(r'var id_type_code = \'(.*?)\'', text)[0]
-        # print(json.dumps(self.ticketInfoForPassengerForm, sort_keys=True, indent=2, ensure_ascii=False))
+        print(json.dumps(self.ticketInfoForPassengerForm, sort_keys=True, indent=2, ensure_ascii=False))
         # print(json.dumps(self.ticket_submit_order, sort_keys=True, indent=2, ensure_ascii=False))
         self.D = self.P(self.ticket_seat_codeMap, self.defaultTicketTypes)
 
@@ -276,9 +278,9 @@ class GrabTicket(object):
         af = 'normalPassenger_0'
         aj = self.ay[int(af.split('_')[1])]
         ac = self.ticket_type2(aj['passenger_type']) #index=3
-        args = [af, '3', '硬卧（￥65.5）', '1', '成人票', aj['passenger_name'], aj['passenger_id_type_code'], aj['passenger_id_type_name'],\
-                aj['passenger_id_no'], aj['mobile_no'], '', self.ticketInfoForPassengerForm['tour_flag'], True, \
-                aj['passenger_type'], False, None]
+        args = [af, '3', '硬卧（￥65.5）', '1', '成人票', aj['passenger_name'], aj['passenger_id_type_code'],\
+                aj['passenger_id_type_name'], aj['passenger_id_no'], aj['mobile_no'], '',\
+                self.ticketInfoForPassengerForm['tour_flag'], True, aj['passenger_type'], False, None]
 
         self.add_limit_tickets(*args)
 
@@ -286,15 +288,11 @@ class GrabTicket(object):
 
         # 验证订单
         flag = self.check_order_info(token)
+
         if flag:  # 验证成功
-            form_data = {
-
-            }
-            queue_count_data = self.get_queue_count(form_data)  # 获取队列计数
-            # 提交订单
-
+            return self.get_queue_count(token)  # 获取队列计数
         else:
-            flag = False
+            return False
 
     def update_save_passenger_info(self, html):
         bs = BeautifulSoup(html, 'lxml')
@@ -319,16 +317,130 @@ class GrabTicket(object):
                     b = z
             return b + 1
 
-    def get_queue_count(self, data):
+    def get_queue_count(self, token):
         """获取队列计数"""
         url = 'https://kyfw.12306.cn/otn/confirmPassenger/getQueueCount'
+
+        data = {
+            'train_date': self.get_standard_time(
+                datetime.datetime.fromtimestamp(int(self.orderRequestDTO['train_date']['time'])/1000)),
+            'train_no': self.orderRequestDTO['train_no'],
+            'stationTrainCode': self.orderRequestDTO['station_train_code'],
+            'seatType': self.limit_tickets[0]['seat_type'],
+            'fromStationTelecode': self.orderRequestDTO['from_station_telecode'],
+            'toStationTelecoe': self.orderRequestDTO['to_station_telecode'],
+            'leftTicket': self.ticketInfoForPassengerForm['queryLeftTicketRequestDTO']['ypInfoDetail'],
+            'purpose_codes': self.ticketInfoForPassengerForm['purpose_codes'],
+            'train_location': self.ticketInfoForPassengerForm['train_location'],
+            '_json_att': '',
+            'REPEAT_SUBMIT_TOKEN': token
+        }
+        print(data)
         res = self.session.post(url, data=data, verify=False)
         msg = json.loads(res.text)
+        print(msg)
+
         if msg['status']:
-            return msg['data']
+            return self.confirm_single_for_queue(token)
         else:
             print(msg['messages'])
             return False
+
+    def confirm_single_for_queue(self, token):
+        """确认队列单"""
+        url = 'https://kyfw.12306.cn/otn/confirmPassenger/confirmSingleForQueue'
+        data = {
+            'passengerTicketStr': self.get_passenger_tickets(),
+            'oldPassengerStr': self.get_old_passengers(),
+            'randCode': '',
+            'purpose_codes': self.ticketInfoForPassengerForm['purpose_codes'],
+            'key_check_isChange': self.ticketInfoForPassengerForm['key_check_isChange'],
+            'leftTicketStr': self.ticketInfoForPassengerForm['leftTicketStr'],
+            'train_location': self.ticketInfoForPassengerForm['train_location'],
+            'choose_seats': '',
+            'seatDetailType': '000',
+            'roomType': '00',
+            'dwAll': 'N',
+            '_json_att': '',
+            'REPEAT_SUBMIT_TOKEN': token
+        }
+        res = self.session.post(url, data=data, verify=False)
+        msg = json.loads(res.text)
+        print(res.text)
+        flag = False
+
+        if msg['status']:
+
+            if not msg['data']['submitStatus']:
+                print('出票失败！原因：' + msg['data']['errMsg'])
+
+            else:
+                time.sleep(2)
+                flag = self.query_order_wait_time(token)
+
+        else:
+            print('订票失败！很抱歉！请重新订票')
+
+        return flag
+
+    def query_order_wait_time(self, token):
+        """获取下次请求等待时间"""
+        t = str(int(time.time() * 1000))
+        url = 'https://kyfw.12306.cn/otn/confirmPassenger/queryOrderWaitTime?random=' + t\
+            + '&tourFlag=' + self.ticketInfoForPassengerForm['tour_flag'] + '&_json_att=&REPEAT_SUBMIT_TOKEN=' + token
+        res = self.session.get(url, verify=False)
+        print(res.text)
+        msg = json.loads(res.text)
+
+        if msg['data'] and msg['data']['queryOrderWaitTimeStatus']:
+            waitObj = msg['data']
+            if waitObj['waitTime'] != -100 and waitObj['waitTime'] != -1:
+                if waitObj['waitTime'] == -2:
+                    print(waitObj['msg'])
+                    return False
+                else:
+                    time.sleep(3)
+                    self.query_order_wait_time(token)
+            else:
+                return self.finish_method(waitObj['tourFlag'], waitObj['waitTime'], waitObj, token)
+
+        else:
+            return False
+
+    def finish_method(self, tour_flag, wait_time, wait_obj, token):
+        """订单完成"""
+        url = ''
+        if wait_time == -1 or wait_time == -100:
+            if tour_flag == self.ticket_submit_order['tour_flag']['dc']:
+                url = 'https://kyfw.12306.cn/otn/confirmPassenger/resultOrderForDcQueue'
+            elif tour_flag == self.ticket_submit_order['tour_flag']['wc']:
+                url = 'https://kyfw.12306.cn/otn/confirmPassenger/resultOrderForWcQueue'
+            elif tour_flag == self.ticket_submit_order['tour_flag']['fc']:
+                url = 'https://kyfw.12306.cn/otn/confirmPassenger/resultOrderForFcQueue'
+            elif tour_flag == self.ticket_submit_order['tour_flag']['gc']:
+                url = 'https://kyfw.12306.cn/otn/confirmPassenger/resultOrderForGcQueue'
+            data = {
+                'orderSequence_no': wait_obj['orderId'],
+                '_json_att': '',
+                'REPEAT_SUBMIT_TOKEN': token
+            }
+            res = self.session.post(url, data=data, verify=False)
+            print(res.text)
+            msg = json.loads(res.text)
+            if msg['status']:
+                if msg['data']['submitStatus']:
+                    self.ots_redirect()
+                    return True
+                else:
+                    print(msg['data']['errMsg'])
+        return False
+
+    def ots_redirect(self):
+        """跳转到此"""
+        t = str(int(time.time() * 1000))
+        url = 'https://kyfw.12306.cn/otn//payOrder/init?random=' + t
+        res = self.session.post(url, verify=False)
+        print(res.text)
 
     @staticmethod
     def get_week(date):
@@ -339,7 +451,7 @@ class GrabTicket(object):
     @staticmethod
     def get_standard_time(date):
         """获取标准时间"""
-        return date.strftime('%a %b %Y %H:%M:%S ') + 'GMT+0800 (中国标准时间)'
+        return date.strftime('%a %b %d %Y %H:%M:%S ') + 'GMT+0800 (中国标准时间)'
 
     def get_passenger_tickets(self):
         _str = ''
@@ -354,7 +466,7 @@ class GrabTicket(object):
         _str = ''
         for d in self.limit_tickets:
             if self.ticketInfoForPassengerForm['tour_flag'] == self.ticket_submit_order['tour_flag']['fc']\
-                or self.ticketInfoForPassengerForm['tour_flag'] == self.ticket_submit_order['tour_flag']['gc']:
+                    or self.ticketInfoForPassengerForm['tour_flag'] == self.ticket_submit_order['tour_flag']['gc']:
                 a = d['name'] + ',' + a['id_type'] + ',' + a['id_no'] + ',' + a['passenger_type']
                 _str += a + '_'
             else:
@@ -453,15 +565,16 @@ class GrabTicket(object):
             'REPEAT_SUBMIT_TOKEN': token
         }
 
-        print(data)
-
         res = self.session.post(url, data=data, verify=False)
-        print(res.text)
-        return False
-        msg = json.loads(res.text)
 
-        if msg['status'] and msg['data']['submitStatus']:
-            return True
+        msg = json.loads(res.text)
+        print('check_order_info:')
+        print(msg)
+
+        if msg['status']:
+            if msg['data']['submitStatus']:
+                if 'get608Msg' not in msg['data'] or not msg['data']['get608Msg']:
+                    return True
         else:
             print(msg['messages'])
             return False
@@ -600,7 +713,6 @@ class GrabTicket(object):
 
         print(json.dumps(info, sort_keys=True, indent=2, ensure_ascii=False))
 
-        t = {}
         while True:
             k = input('开始预订，请输入%d - %d之间的数字来选择车次：' % (1, len(info)))
             if not k.isdigit():
@@ -611,8 +723,8 @@ class GrabTicket(object):
                 print('输入有误!请重新输入')
                 continue
 
-            t = info[k - 1]
-            if self.submit_order(t, self.get_code_by_input(_from), self.get_code_by_input(_to)):
+            self.current_train = info[k - 1]
+            if self.submit_order(self.get_code_by_input(_from), self.get_code_by_input(_to)):
                 break
             else:
                 continue
@@ -644,6 +756,20 @@ class GrabTicket(object):
                 return stations[value]['汉字']
         except TypeError as e:
             print(e.with_traceback())
+
+    def cancel_no_complete_order(self, sequence_no):
+        """取消未完成的订单"""
+        url = 'https://kyfw.12306.cn/otn/queryOrder/cancelNoCompleteMyOrder'
+        data = {
+            'sequence_no': sequence_no,
+            'cancel_flag': '',
+            '_json_att': ''
+        }
+        res = self.session.post(url, data=data, verify=False)
+        msg = json.loads(res.text)
+        print(msg)
+        if msg['status'] and msg['data']['existError'] == 'N':
+            print("取消订单成功！")
 
 
 if __name__ == '__main__':
