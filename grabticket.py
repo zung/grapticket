@@ -1,3 +1,5 @@
+# -*- coding:utf-8 -*-
+
 import json
 import random
 import re
@@ -440,7 +442,22 @@ class GrabTicket(object):
         t = str(int(time.time() * 1000))
         url = 'https://kyfw.12306.cn/otn//payOrder/init?random=' + t
         res = self.session.post(url, verify=False)
-        print(res.text)
+        pattern = r'var parOrderDTOJson = \'(.*?)\';'
+        parOrderDTOStr = re.findall(pattern, res.text)[0].replace(r'\"', '"')
+        parOrderDTOJson = json.loads(parOrderDTOStr)
+
+        pattern2 = r'var passangerTicketList = (.*?);'
+        passangerTicketListStr = re.findall(pattern2, res.text)[0].replace(r'null', "''").replace(r"'", '"')
+        passangerTicketListJson = json.loads(passangerTicketListStr)
+
+        pattern3 = r'var insInfos = (.*?);'
+        insInfosStr = re.findall(pattern3, res.text)[0].replace(r'null', "''").replace(r"'", '"')
+        insInfosJson = json.loads(insInfosStr)
+
+        print("车票信息：")
+        print(json.dumps(parOrderDTOJson, sort_keys=True, indent=2, ensure_ascii=False))
+        print(json.dumps(passangerTicketListJson, sort_keys=True, indent=2, ensure_ascii=False))
+        print(json.dumps(insInfosJson, sort_keys=True, indent=2, ensure_ascii=False))
 
     @staticmethod
     def get_week(date):
