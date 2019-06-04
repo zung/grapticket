@@ -13,7 +13,6 @@ from bs4 import BeautifulSoup
 
 from urllib3.exceptions import InsecureRequestWarning
 
-
 class GrabTicket(object):
     """12306抢票系统"""
     # 禁用安全请求警告
@@ -21,14 +20,24 @@ class GrabTicket(object):
 
     headers = {
         "Accept": "*/*",
-        "User-Agent": "Mozilla/5.0(Windows NT 10.0; Win64; x64) AppleWebKit/537.36(KHTML, like Gecko)\
-         Chrome/62.0.3202.89 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)\
+         Chrome/74.0.3729.169 Safari/537.36",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "Accept-Language": "zh-CN, zh; q=0.9",
+        "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     }
 
     session = requests.session()
     session.headers = headers
+
+    popup_baseUrl = 'https://kyfw.12306.cn'
+    popup_publicName = '/otn'
+    popup_url = {
+        'loginConf': popup_baseUrl + popup_publicName + '/login/conf',
+        'getPassCodeNew': popup_baseUrl + popup_publicName + '/passcodeNew/getPassCodeNew?module=login&rand=sjrand&',
+        'checkRandCodeAnsyn': popup_baseUrl + popup_publicName + '/passcodeNew/checkRandCodeAnsyn',
+        'login': popup_baseUrl + popup_publicName + '/login/loginAysnSuggest',
+        'getBanners': popup_baseUrl + popup_publicName + '/index12306/getLoginBanner',
+    }
 
     def __init__(self):
         self.D = None
@@ -46,8 +55,10 @@ class GrabTicket(object):
         self.current_train = {}  # 当前选择的车次
 
     def index(self):
-        url = 'https://kyfw.12306.cn/otn/login/init'
+        url = self.popup_url.get("loginConf")
         res = self.session.get(url, verify=False)
+        msg=json.loads(res.text)
+        print(res.text)
         self.get_captcha()
 
     def check_captcha(self):
@@ -63,16 +74,17 @@ class GrabTicket(object):
             'rand': 'sjrand'
         }
         res = self.session.post(url, data=data, verify=False)
+
         msg = json.loads(res.text)
 
         print(msg['result_message'])
 
         if msg['result_code'] == '4':
-            self.start_login()
+            self.start_login(code)
         else:
             self.get_captcha()
 
-    def start_login(self):
+    def start_login(self, randCode):
         """开始登录"""
         url = 'https://kyfw.12306.cn/passport/web/login'
         username = input("请输入用户名：")
@@ -81,10 +93,14 @@ class GrabTicket(object):
         data = {
             "username": username,
             "password": password,
-            "appid": 'otn'
+            "appid": 'otn',
+            "answer": randCode,
         }
 
         res = self.session.post(url, data=data, verify=False)
+        res.encoding = "utf-8"
+        print(res.text)
+
         msg = json.loads(res.text)
 
         print(msg)
